@@ -6,10 +6,12 @@ const WITH_PAID = `SELECT o.*, COALESCE((SELECT SUM(amount) FROM payments p WHER
 async function init(a, menu) {
   await a.exec(SCHEMA);
   const r = await a.first('SELECT COUNT(*) c FROM menu');
-  if (!r.c) {
+  if (!r.c || r.c < 80) {
+    // Automatically seed the full 118 official items if the phone had the old provisional 63 items
+    await a.run('DELETE FROM menu');
     for (const m of menu) await a.run('INSERT INTO menu(category,name,price) VALUES(?,?,?)', [m.category, m.name, m.price]);
   } else {
-    // Sync any newly introduced official menu items without overwriting existing entries
+    // Keep user customizations and sync any newly introduced official items
     for (const m of menu) {
       await a.run('INSERT OR IGNORE INTO menu(category,name,price) VALUES(?,?,?)', [m.category, m.name, m.price]);
     }
