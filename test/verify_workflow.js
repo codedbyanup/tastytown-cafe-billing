@@ -44,31 +44,31 @@ const a = {
   assert.ok(!openOrdersBefore.find(o => o.table_no === tableNo), 'Table 1 should be free initially');
   console.log('2. Table 1 selected and confirmed free.');
 
-  // 3. Add three menu items: Coffee (₹80), Sandwich (₹90), Brownie (₹50)
-  const coffee = loadedMenu.find(m => m.name === 'Coffee');
-  const sandwich = loadedMenu.find(m => m.name === 'Sandwich');
-  const brownie = loadedMenu.find(m => m.name === 'Brownie');
+  // 3. Add three menu items from official menu: Veg sandwich (₹99), Cold coffee (₹79), Butter bun maska (₹49)
+  const item1 = loadedMenu.find(m => m.name === 'Veg sandwich');
+  const item2 = loadedMenu.find(m => m.name === 'Cold coffee');
+  const item3 = loadedMenu.find(m => m.name === 'Butter bun maska');
 
-  assert.ok(coffee, 'Coffee should exist in menu');
-  assert.ok(sandwich, 'Sandwich should exist in menu');
-  assert.ok(brownie, 'Brownie should exist in menu');
+  assert.ok(item1, 'Veg sandwich should exist in official menu');
+  assert.ok(item2, 'Cold coffee should exist in official menu');
+  assert.ok(item3, 'Butter bun maska should exist in official menu');
 
   const selectedItems = [
-    { name: coffee.name, price: coffee.price, qty: 1 },
-    { name: sandwich.name, price: sandwich.price, qty: 1 },
-    { name: brownie.name, price: brownie.price, qty: 1 }
+    { name: item1.name, price: item1.price, qty: 1 },
+    { name: item2.name, price: item2.price, qty: 1 },
+    { name: item3.name, price: item3.price, qty: 1 }
   ];
-  console.log(`3. Added 3 items: ${coffee.name} (₹${coffee.price}), ${sandwich.name} (₹${sandwich.price}), ${brownie.name} (₹${brownie.price})`);
+  console.log(`3. Added 3 items: ${item1.name} (₹${item1.price}), ${item2.name} (₹${item2.price}), ${item3.name} (₹${item3.price})`);
 
-  // 4. Verify automatic price calculation: 80 + 90 + 50 = 220
+  // 4. Verify automatic price calculation: 99 + 79 + 49 = 227
   const original = B.orderTotal(selectedItems);
-  assert.strictEqual(original, 220, 'Original total must be 220');
+  assert.strictEqual(original, 227, 'Original total must be 227');
   console.log(`4. Automatic price calculation verified: original = ₹${original}`);
 
-  // 5 & 6. Change original bill of ₹220 to ₹200. Verify ₹20 discount calculation
+  // 5 & 6. Change original bill of ₹227 to ₹200. Verify ₹27 discount calculation
   const desiredFinal = 200;
   const calculatedDiscount = original - desiredFinal;
-  assert.strictEqual(calculatedDiscount, 20, 'Calculated discount must be 20');
+  assert.strictEqual(calculatedDiscount, 27, 'Calculated discount must be 27');
   const final = original - calculatedDiscount;
   assert.strictEqual(final, 200, 'Final amount must be 200');
   console.log(`5 & 6. Bill changed to ₹${desiredFinal}. Calculated discount = ₹${calculatedDiscount}`);
@@ -97,8 +97,8 @@ const a = {
   // Verify in SQLite database directly
   const savedOrder = await store.loadOrder(a, saveResult.id);
   assert.strictEqual(savedOrder.table_no, 1);
-  assert.strictEqual(savedOrder.original, 220);
-  assert.strictEqual(savedOrder.discount, 20);
+  assert.strictEqual(savedOrder.original, 227);
+  assert.strictEqual(savedOrder.discount, 27);
   assert.strictEqual(savedOrder.final, 200);
   assert.strictEqual(savedOrder.status, 'paid');
   assert.strictEqual(savedOrder.items.length, 3);
@@ -124,8 +124,8 @@ const a = {
   dash = await store.dashboard(a, today, today);
   console.log('12. Dashboard metrics:', dash);
   assert.strictEqual(dash.orders, 1, 'Orders count should be 1');
-  assert.strictEqual(dash.original, 220, 'Original total should be 220');
-  assert.strictEqual(dash.discount, 20, 'Discount total should be 20');
+  assert.strictEqual(dash.original, 227, 'Original total should be 227');
+  assert.strictEqual(dash.discount, 27, 'Discount total should be 27');
   assert.strictEqual(dash.final, 200, 'Net bill should be 200');
   assert.strictEqual(dash.received, 200, 'Amount received should be 200');
   assert.strictEqual(dash.cash, 200, 'Cash received should be 200');

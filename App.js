@@ -56,6 +56,7 @@ function MainApp() {
 
   const body = ord ? <Order key={`ord-${refreshKey}`} A={A} {...ord} done={m => { setOrd(null); setMsg(m || ''); }} />
     : tab === 'tables' ? <Tables key={`tbl-${refreshKey}`} A={A} msg={msg} pick={setOrd} />
+    : tab === 'menu' ? <MenuManager key={`menu-${refreshKey}`} A={A} onMenuChanged={() => setRefreshKey(k => k + 1)} />
     : tab === 'dash' ? <Dash key={`dash-${refreshKey}`} A={A} /> : <History key={`hist-${refreshKey}`} A={A} pick={setOrd} onEraseAll={handleEraseAll} />;
 
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
@@ -90,7 +91,8 @@ function MainApp() {
         <View style={[s.tabs, { paddingBottom: bottomInset + 10 }]}>
           {[
             ['tables', '🍽️ Tables'],
-            ['dash', '📊 Dashboard'],
+            ['menu', '📋 Menu'],
+            ['dash', '📊 Dash'],
             ['hist', '📜 History'],
           ].map(([k, l]) => (
             <TouchableOpacity
@@ -124,8 +126,9 @@ function Order({ A, table, id, done }) {
   const [menu, setMenu] = useState([]), [cat, setCat] = useState(null), [cart, setCart] = useState({});
   const [d, setD] = useState(''), [fEdit, setFEdit] = useState(null), [over, setOver] = useState(false);
   const [rec, setRec] = useState(''), [method, setMethod] = useState('Cash'), [paidBefore, setPB] = useState(0);
+  const [menuSearch, setMenuSearch] = useState('');
   useEffect(() => {
-    store.getMenu(A).then(m => { setMenu(m); setCat(m[0].category); });
+    store.getMenu(A).then(m => { setMenu(m); if (m && m.length > 0) setCat(m[0].category); });
     if (id) store.loadOrder(A, id).then(o => { const c = {}; o.items.forEach(i => (c[i.name] = i)); setCart(c); setD(o.discount ? String(o.discount) : ''); setPB(o.paid); });
   }, []);
   const items = Object.values(cart), original = B.orderTotal(items), discount = B.num(d), final = original - discount;
@@ -148,9 +151,34 @@ function Order({ A, table, id, done }) {
         </TouchableOpacity>
         <Text style={s.h}>Table {table}{id ? `  (${id})` : ''}</Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>{[...new Set(menu.map(m => m.category))].map(c => <Chip key={c} t={c} sel={c === cat} on={() => setCat(c)} />)}</ScrollView>
-      <View style={s.menuWrap}>{menu.filter(m => m.category === cat).map(m =>
-        <TouchableOpacity key={m.name} style={s.item} onPress={() => add(m)}><Text style={s.itN}>{m.name}</Text><Text style={s.itP}>{R(m.price)}</Text></TouchableOpacity>)}</View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0d5c5', paddingHorizontal: 10 }}>
+        <TextInput
+          style={{ flex: 1, fontSize: 13, paddingVertical: 6, color: '#333' }}
+          placeholder="🔍 Filter menu items..."
+          value={menuSearch}
+          onChangeText={setMenuSearch}
+        />
+        {menuSearch ? (
+          <TouchableOpacity onPress={() => setMenuSearch('')} style={{ padding: 4 }}>
+            <Text style={{ fontSize: 13, color: '#888' }}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {!menuSearch && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {[...new Set(menu.map(m => m.category))].map(c => <Chip key={c} t={c} sel={c === cat} on={() => setCat(c)} />)}
+        </ScrollView>
+      )}
+      <View style={s.menuWrap}>
+        {menu
+          .filter(m => (!menuSearch ? m.category === cat : m.name.toLowerCase().includes(menuSearch.toLowerCase()) || m.category.toLowerCase().includes(menuSearch.toLowerCase())))
+          .map(m => (
+            <TouchableOpacity key={m.id || m.name} style={s.item} onPress={() => add(m)}>
+              <Text style={s.itN}>{m.name}</Text>
+              <Text style={s.itP}>{R(m.price)}</Text>
+            </TouchableOpacity>
+          ))}
+      </View>
       <Text style={s.h2}>Order</Text>
       {items.length === 0 && <Text style={s.mute}>Tap items above to add</Text>}
       {items.map(i => (<View key={i.name} style={s.cartRow}>
@@ -497,6 +525,255 @@ function History({ A, pick, onEraseAll }) {
     </View>);
 }
 
+function MenuManager({ A, onMenuChanged }) {
+  const [menu, setMenu] = useState([]);
+  const [cat, setCat] = useState('All');
+  const [search, setSearch] = useState('');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [nameInput, setNameInput] = useState('');
+  const [priceInput, setPriceInput] = useState('');
+  const [catInput, setCatInput] = useState('Burger');
+
+  const loadMenu = async () => {
+    try {
+      const m = await store.getMenu(A);
+      setMenu(m || []);
+    } catch (e) {
+      console.error('Failed to load menu:', e);
+    }
+  };
+
+  useEffect(() => { loadMenu(); }, []);
+
+  const categories = ['All', ...new Set(menu.map(m => m.category))];
+
+  const openAdd = () => {
+    setEditingItem(null);
+    setNameInput('');
+    setPriceInput('');
+    setCatInput(cat !== 'All' ? cat : (menu[0]?.category || 'Burger'));
+    setModalVisible(true);
+  };
+
+  const openEdit = item => {
+    setEditingItem(item);
+    setNameInput(item.name);
+    setPriceInput(String(item.price));
+    setCatInput(item.category);
+    setModalVisible(true);
+  };
+
+  const handleSave = async () => {
+    const trimmedName = nameInput.trim();
+    const parsedPrice = parseInt(priceInput, 10);
+    if (!trimmedName) {
+      Alert.alert('Required', 'Please enter an item name.');
+      return;
+    }
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      Alert.alert('Invalid Price', 'Please enter a valid price (₹0 or more).');
+      return;
+    }
+    try {
+      if (editingItem) {
+        await store.updateMenuItem(A, { id: editingItem.id, category: catInput, name: trimmedName, price: parsedPrice });
+        Alert.alert('Updated', `"${trimmedName}" is now ₹${parsedPrice}`);
+      } else {
+        await store.addMenuItem(A, { category: catInput, name: trimmedName, price: parsedPrice });
+        Alert.alert('Added', `"${trimmedName}" added for ₹${parsedPrice}`);
+      }
+      setModalVisible(false);
+      await loadMenu();
+      if (onMenuChanged) onMenuChanged();
+    } catch (err) {
+      Alert.alert('Error', err.message || String(err));
+    }
+  };
+
+  const handleDelete = item => {
+    Alert.alert(
+      'Delete Item',
+      `Are you sure you want to delete "${item.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await store.deleteMenuItem(A, item.id);
+              await loadMenu();
+              if (onMenuChanged) onMenuChanged();
+            } catch (err) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRestoreDefaults = () => {
+    Alert.alert(
+      'Restore Official Menu',
+      'Reset all menu items and prices back to the official Tasty Town Cafe defaults (118 items)?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore Defaults',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { MENU } = require('./menu');
+              await store.resetMenu(A, MENU);
+              await loadMenu();
+              if (onMenuChanged) onMenuChanged();
+              Alert.alert('Success', `Restored official menu with ${MENU.length} items!`);
+            } catch (err) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const filtered = menu.filter(m => {
+    const matchCat = cat === 'All' || m.category === cat;
+    const matchSearch = !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.category.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#fff8f0' }}>
+      <View style={{ backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderColor: '#e8dbcb' }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: '#6b1d12' }}>📋 Menu Manager</Text>
+            <Text style={{ fontSize: 11, color: '#777' }}>{filtered.length} of {menu.length} items</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={handleRestoreDefaults} style={{ backgroundColor: '#f3e9df', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#e0d5c5' }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#6b1d12' }}>🔄 Restore</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openAdd} style={{ backgroundColor: '#1b7f3b', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>+ Add Item</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TextInput
+          style={{ backgroundColor: '#faf6f0', borderWidth: 1, borderColor: '#e0d5c5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, marginTop: 8 }}
+          placeholder="🔍 Search items by name..."
+          value={search}
+          onChangeText={setSearch}
+        />
+      </View>
+
+      <View style={{ backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#f0e6d8' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+          {categories.map(c => (
+            <Chip key={c} t={c} sel={c === cat} on={() => setCat(c)} />
+          ))}
+        </ScrollView>
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 10, paddingBottom: 60 }}>
+        {filtered.length === 0 ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Text style={{ fontSize: 32, marginBottom: 8 }}>🍽️</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#666' }}>No menu items found</Text>
+            <Text style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Try clearing the search or category filter</Text>
+          </View>
+        ) : (
+          filtered.map(item => (
+            <View key={item.id || item.name} style={s.menuMgmtCard}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#222' }}>{item.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                  <Text style={s.catPill}>{item.category}</Text>
+                </View>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#6b1d12', marginBottom: 4 }}>{R(item.price)}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity onPress={() => openEdit(item)} style={s.editPill}>
+                    <Text style={s.editPillText}>✏️ Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDelete(item)} style={[s.delPill, { marginLeft: 6 }]}>
+                    <Text style={s.delPillText}>🗑️</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ))
+        )}
+      </ScrollView>
+
+      <Modal visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
+        <View style={s.modalBackdrop}>
+          <View style={s.modalDialog}>
+            <Text style={{ fontSize: 18, fontWeight: '800', color: '#6b1d12', marginBottom: 12 }}>
+              {editingItem ? '✏️ Edit Menu Item' : '➕ Add Menu Item'}
+            </Text>
+
+            <Text style={s.modalFieldLbl}>Item Name</Text>
+            <TextInput
+              style={s.modalTextInput}
+              placeholder="e.g. Avocado Sandwich"
+              value={nameInput}
+              onChangeText={setNameInput}
+            />
+
+            <Text style={[s.modalFieldLbl, { marginTop: 10 }]}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 40, marginVertical: 4 }}>
+              {categories.filter(c => c !== 'All').map(c => (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => setCatInput(c)}
+                  style={[s.catSelectChip, catInput === c && s.catSelectChipActive]}>
+                  <Text style={[s.catSelectChipText, catInput === c && { color: '#fff', fontWeight: '800' }]}>{c}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TextInput
+              style={[s.modalTextInput, { marginTop: 4 }]}
+              placeholder="Or type custom category..."
+              value={catInput}
+              onChangeText={setCatInput}
+            />
+
+            <Text style={[s.modalFieldLbl, { marginTop: 10 }]}>Price (₹)</Text>
+            <TextInput
+              style={s.modalTextInput}
+              placeholder="e.g. 129"
+              keyboardType="numeric"
+              value={priceInput}
+              onChangeText={setPriceInput}
+            />
+
+            <View style={{ flexDirection: 'row', marginTop: 18 }}>
+              <TouchableOpacity
+                onPress={() => setModalVisible(false)}
+                style={[s.modalBtn, { backgroundColor: '#eee', flex: 1, marginRight: 8 }]}>
+                <Text style={{ color: '#555', fontWeight: '700', fontSize: 15 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleSave}
+                style={[s.modalBtn, { backgroundColor: '#1b7f3b', flex: 2 }]}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>
+                  {editingItem ? 'Save Changes' : 'Add Item'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#fff8f0' }, load: { margin: 80, fontSize: 18 },
   top: { backgroundColor: '#6b1d12', paddingBottom: 10, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -637,4 +914,109 @@ const s = StyleSheet.create({
   statusSummaryBox: { flex: 1, backgroundColor: '#FFF', borderRadius: 12, padding: 12, marginHorizontal: 3, borderWidth: 1, borderColor: '#EFE5D9', alignItems: 'center' },
   statusSummaryVal: { fontSize: 20, fontWeight: '900', color: '#38160E' },
   statusSummaryLbl: { fontSize: 11, fontWeight: '700', color: '#777', marginTop: 2 },
+
+  // Menu Manager Styles
+  menuMgmtCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#f0d7a7',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  catPill: {
+    backgroundColor: '#fbece8',
+    color: '#6b1d12',
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  editPill: {
+    backgroundColor: '#ffc928',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  editPillText: {
+    color: '#333',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  delPill: {
+    backgroundColor: '#fee2e2',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  delPillText: {
+    color: '#b91c1c',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  modalDialog: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 18,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  modalFieldLbl: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#555',
+    marginBottom: 4,
+  },
+  modalTextInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    backgroundColor: '#fffdfa',
+  },
+  catSelectChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: '#eee',
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catSelectChipActive: {
+    backgroundColor: '#6b1d12',
+  },
+  catSelectChipText: {
+    fontSize: 12,
+    color: '#444',
+    fontWeight: '600',
+  },
+  modalBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

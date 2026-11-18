@@ -112,5 +112,34 @@ const now = new Date(2026, 10, 18, 13, 0, 0); // Wed 18 Nov 2026
   assert.strictEqual(clearedDash.orders, 0);
   assert.strictEqual(clearedDash.received, 0);
 
+  // 7. Menu editing & management (addMenuItem, updateMenuItem, deleteMenuItem, resetMenu)
+  const initialMenuCount = (await store.getMenu(a)).length;
+  // Add item
+  await store.addMenuItem(a, { category: 'Super Snacks', name: 'Peri Peri Bun Maska', price: 65 });
+  const afterAdd = await store.getMenu(a);
+  assert.strictEqual(afterAdd.length, initialMenuCount + 1);
+  const addedItem = afterAdd.find(m => m.name === 'Peri Peri Bun Maska');
+  assert.ok(addedItem && addedItem.id);
+  assert.strictEqual(addedItem.price, 65);
+  assert.strictEqual(addedItem.category, 'Super Snacks');
+
+  // Update item
+  await store.updateMenuItem(a, { id: addedItem.id, category: 'Super Snacks', name: 'Peri Peri Bun Maska (Special)', price: 75 });
+  const afterUpdate = await store.getMenu(a);
+  const updatedItem = afterUpdate.find(m => m.id === addedItem.id);
+  assert.strictEqual(updatedItem.name, 'Peri Peri Bun Maska (Special)');
+  assert.strictEqual(updatedItem.price, 75);
+
+  // Delete item
+  await store.deleteMenuItem(a, addedItem.id);
+  const afterDelete = await store.getMenu(a);
+  assert.strictEqual(afterDelete.length, initialMenuCount);
+  assert.ok(!afterDelete.find(m => m.id === addedItem.id));
+
+  // Reset menu back to official defaults
+  await store.resetMenu(a, MENU);
+  const afterReset = await store.getMenu(a);
+  assert.strictEqual(afterReset.length, MENU.length);
+
   console.log('ALL TESTS PASSED');
 })().catch(e => { console.error(e); process.exit(1); });

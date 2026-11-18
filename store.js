@@ -6,9 +6,16 @@ const WITH_PAID = `SELECT o.*, COALESCE((SELECT SUM(amount) FROM payments p WHER
 async function init(a, menu) {
   await a.exec(SCHEMA);
   const r = await a.first('SELECT COUNT(*) c FROM menu');
-  if (!r.c) for (const m of menu) await a.run('INSERT INTO menu(category,name,price) VALUES(?,?,?)', [m.category, m.name, m.price]);
+  if (!r.c) {
+    for (const m of menu) await a.run('INSERT INTO menu(category,name,price) VALUES(?,?,?)', [m.category, m.name, m.price]);
+  } else {
+    // Sync any newly introduced official menu items without overwriting existing entries
+    for (const m of menu) {
+      await a.run('INSERT OR IGNORE INTO menu(category,name,price) VALUES(?,?,?)', [m.category, m.name, m.price]);
+    }
+  }
 }
-const getMenu = a => a.all('SELECT category,name,price FROM menu ORDER BY id');
+const getMenu = a => a.all('SELECT id, category, name, price FROM menu ORDER BY id');
 const listOrders = (a, onlyOpen) =>
   a.all(`${WITH_PAID} ${onlyOpen ? "WHERE o.status='open'" : ''} ORDER BY o.created_at DESC, o.id DESC LIMIT 300`);
 
@@ -133,4 +140,54 @@ async function clearData(a) {
   await a.run('DELETE FROM orders');
 }
 
-module.exports = { init, getMenu, listOrders, loadOrder, saveOrder, dashboard, dailyTrend, topItems, categoryBreakdown, clearData };
+// Adds a new menu item to SQLite.
+async function addMenuItem(a, { category, name, price }) {
+  const cleanName = (name || '').trim();
+  const cleanCat = (category || 'Other').trim();
+  const cleanPrice = parseInt(price, 10) || 0;
+  if (!cleanName) throw new Error('Item name is required');
+  if (cleanPrice < 0) throw new Error('Price cannot be negative');
+  return a.run('INSERT INTO menu(category, name, price) VALUES(?,?,?)', [cleanCat, cleanName, cleanPrice]);
+}
+
+// Updates an existing menu item in SQLite (name, price, category).
+async function updateMenuItem(a, { id, category, name, price }) {
+  const cleanName = (name || '').trim();
+  const cleanCat = (category || 'Other').trim();
+  const cleanPrice = parseInt(price, 10) || 0;
+  if (!id) throw new Error('Item ID is required');
+  if (!cleanName) throw new Error('Item name is required');
+  if (cleanPrice < 0) throw new Error('Price cannot be negative');
+  return a.run('UPDATE menu SET category=?, name=?, price=? WHERE id=?', [cleanCat, cleanName, cleanPrice, id]);
+}
+
+// Deletes a menu item from SQLite.
+async function deleteMenuItem(a, id) {
+  if (!id) throw new Error('Item ID is required');
+  return a.run('DELETE FROM menu WHERE id=?', [id]);
+}
+
+// Resets/restores menu back to official default menu list.
+async function resetMenu(a, defaultMenu) {
+  await a.run('DELETE FROM menu');
+  for (const m of defaultMenu) {
+    await a.run('INSERT INTO menu(category, name, price) VALUES(?,?,?)', [m.category, m.name, m.price]);
+  }
+}
+
+module.exports = {
+  init,
+  getMenu,
+  addMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
+  resetMenu,
+  listOrders,
+  loadOrder,
+  saveOrder,
+  dashboard,
+  dailyTrend,
+  topItems,
+  categoryBreakdown,
+  clearData,
+};
